@@ -1,0 +1,369 @@
+    <!DOCTYPE html>
+    <html lang="en">
+
+
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>ISL TRANSLATOR — Smooth</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+        <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+        <!-- MediaPipe -->
+        <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js"
+            crossorigin="anonymous"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+        <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"
+            crossorigin="anonymous"></script>
+
+        <style>
+            body {
+                font-family: 'Inter', sans-serif;
+                background: #030014;
+                color: #d1d5db;
+                overflow: hidden;
+            }
+
+            .ai-panel {
+                background: rgba(17, 24, 39, 0.6);
+                backdrop-filter: blur(12px);
+                border: 1px solid;
+            }
+
+            .text-orchid {
+                color: #d8b4fe;
+            }
+
+            #static-output {
+                transition: opacity 140ms ease-in-out, transform 180ms ease;
+            }
+
+            #raw-result-debug {
+                position: fixed;
+                bottom: 12px;
+                left: 12px;
+                z-index: 2000;
+                background: rgba(0, 0, 0, 0.6);
+                color: #fff;
+                padding: 8px;
+                border-radius: 6px;
+                max-width: 360px;
+                max-height: 260px;
+                overflow: auto;
+                font-size: 12px;
+            }
+
+            #topk-box {
+                position: fixed;
+                bottom: 12px;
+                right: 12px;
+                z-index: 2000;
+                background: rgba(0, 0, 0, 0.6);
+                color: #fff;
+                padding: 8px;
+                border-radius: 6px;
+                max-width: 360px;
+                max-height: 160px;
+                overflow: auto;
+                font-size: 12px;
+            }
+        </style>
+    </head>
+
+    <body class="text-sm scrollbar-thumb-purple">
+        <div id="app" class="h-screen w-full p-2 flex gap-2 relative z-10">
+            <!-- Left panel -->
+            <aside class="w-[280px] flex-shrink-0 flex flex-col gap-2">
+                <div class="ai-panel border-purple glow-purple p-4 rounded-lg flex flex-col gap-4 h-full">
+                    <div>
+                        <h1 class="text-2xl font-bold text-white">ISL TRANSLATOR</h1>
+                        <p class="text-xs text-gray-400 mt-1">Pretrained mapping — numbers & alphabets</p>
+                    </div>
+                    <div class="border-t border-purple-500/20 pt-4 flex flex-col flex-grow justify-center">
+                        <div class="mode-card bg-purple-500/10 border border-purple-500/20 rounded-lg p-4 mb-4">
+                            <div id="toggle-container" class="flex items-center justify-around">
+                                <span id="static-label"
+                                    class="toggle-label text-lg font-bold text-orchid cursor-pointer">Static</span>
+                                <label for="mode-toggle" class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" value="" id="mode-toggle" class="sr-only peer">
+                                    <div id="toggle-bg"
+                                        class="w-16 h-8 bg-gray-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-1 after:left-[4px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-purple-600">
+                                    </div>
+                                </label>
+                                <span id="dynamic-label"
+                                    class="toggle-label text-lg font-bold text-gray-500 cursor-pointer">Dynamic</span>
+                            </div>
+                        </div>
+                        <div id="mode-description-card"
+                            class="mode-card bg-purple-500/10 border border-purple-500/20 rounded-lg p-4 text-center flex-grow flex items-center justify-center">
+                            <p id="mode-description" class="text-xs text-gray-300 leading-relaxed">Translates numeric (1-9)
+                                and A-Z using backend model from your repo.</p>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Middle (video) -->
+            <div id="main-content" class="flex-grow flex flex-col gap-2">
+                <main id="video-panel"
+                    class="flex-grow ai-panel border-purple glow-purple rounded-lg p-4 flex flex-col transition-all duration-300">
+                    <div
+                        class="relative w-full h-full bg-black/20 rounded-md flex items-center justify-center overflow-hidden group">
+                        <video id="webcam" class="w-full h-full object-cover transform scaleX-[-1]" autoplay
+                            playsinline></video>
+                        <canvas id="landmark-canvas"
+                            class="absolute top-0 left-0 w-full h-full z-10 transform scaleX-[-1]"></canvas>
+
+                        <div id="loading-spinner" class="absolute text-center text-gray-300">
+                            <svg id="spinner-icon" class="animate-spin h-8 w-8 text-orchid"
+                                xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
+                                </circle>
+                                <path class="opacity-75" fill="currentColor"
+                                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            <p class="mt-2 font-medium">Connecting to Python API...</p>
+                        </div>
+                    </div>
+                </main>
+
+                <div id="prediction-controls-wrapper" class="flex-shrink-0 flex justify-center -mt-16 z-20 relative">
+                    <div id="prediction-controls" class="flex gap-4">
+                        <button id="start-btn"
+                            class="w-48 flex items-center justify-center gap-2 bg-orchid-primary text-white font-bold py-3 px-4 rounded-full">Start
+                            Predicting</button>
+                        <button id="stop-btn"
+                            class="hidden w-48 flex items-center justify-center gap-2 bg-red-500 text-white font-bold py-3 px-4 rounded-full">Stop
+                            Predicting</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right sidebar -->
+            <aside id="right-sidebar"
+                class="w-[350px] flex-shrink-0 ai-panel border-purple glow-purple rounded-lg p-4 flex flex-col">
+                <div class="flex flex-col flex-grow">
+                    <h2 class="text-lg font-semibold text-white mb-2">Current Sentence</h2>
+                    <div id="sentence-block"
+                        class="w-full min-h-[80px] bg-black/20 rounded-md p-3 text-base leading-relaxed mb-4 flex-grow-0 overflow-y-auto text-gray-200 border border-purple-500/20">
+                    </div>
+
+                    <div id="mode-specific-ui" class="flex-grow flex flex-col">
+                        <div id="static-ui"
+                            class="flex-grow flex flex-col items-center justify-center text-center transition-opacity duration-300 ease-in-out">
+                            <h2 class="text-lg font-medium text-gray-300 mb-4">Character Output</h2>
+                            <div id="static-output"
+                                class="text-8xl md:text-9xl font-semibold text-orchid h-32 flex items-center justify-center">
+                                -</div>
+                            <div id="confidence-display" class="text-sm text-gray-400 mt-2">Confidence: <span
+                                    id="confidence-value">0%</span></div>
+                        </div>
+
+                        <div id="dynamic-ui"
+                            class="hidden flex-grow flex-col transition-opacity duration-300 ease-in-out opacity-0">
+                            <h2 class="text-lg font-semibold text-white mb-2">Word Suggestions</h2>
+                            <div id="suggestions-container" class="grid grid-cols-1 gap-2 mb-4"></div>
+                        </div>
+                    </div>
+
+                    <div class="flex justify-between items-center mb-2 mt-auto">
+                        <h2 class="text-lg font-semibold text-white">History Log</h2>
+                        <button id="clear-history-btn" title="Clear all history"
+                            class="text-xs text-gray-400 hover:text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled>Clear Log</button>
+                    </div>
+                    <div id="history-container"
+                        class="w-full h-32 flex-shrink-0 bg-black/20 border border-purple-500/20 rounded-md p-2 space-y-2 overflow-y-auto mb-4">
+                        <p class="text-gray-400 text-center text-xs italic mt-4">Completed sentences are logged here.</p>
+                    </div>
+
+                    <div class="mt-auto pt-4 border-t border-purple-500/20 flex flex-col gap-2">
+                        <button id="clear-entry-btn"
+                            class="w-full bg-purple-500/10 text-white font-semibold py-2 px-4 rounded-full">Clear Last
+                            Entry</button>
+                        <button id="clear-all-btn"
+                            class="w-full bg-purple-500/10 text-white font-semibold py-2 px-4 rounded-full">Clear
+                            Sentence</button>
+                    </div>
+                </div>
+            </aside>
+        </div>
+
+        <!-- Debug boxes -->
+        <pre id="raw-result-debug">raw result: -</pre>
+        <pre id="topk-box">top_k: -</pre>
+
+        <script>
+            document.addEventListener('DOMContentLoaded', () => {
+
+                /* ================= CONFIG ================= */
+                const API_BASE_URL = 'http://localhost:5001';
+                const MIN_CONF_UI = 0.35;
+
+                /* ================= DOM ================= */
+                const webcamElement = document.getElementById('webcam');
+                const landmarkCanvas = document.getElementById('landmark-canvas');
+                const staticOutput = document.getElementById('static-output');
+                const confidenceValue = document.getElementById('confidence-value');
+                const startBtn = document.getElementById('start-btn');
+                const stopBtn = document.getElementById('stop-btn');
+                const rawDebug = document.getElementById('raw-result-debug');
+
+                /* ================= STATE ================= */
+                let isPredicting = false;
+                let isApiConnected = false;
+                let lastPrediction = null;
+                let lastTime = 0;
+
+                /* ================= MediaPipe ================= */
+                const ctx = landmarkCanvas.getContext('2d');
+
+                const hands = new Hands({
+                    locateFile: (file) =>
+                        `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`
+                });
+
+                hands.setOptions({
+                    maxNumHands: 2,
+                    modelComplexity: 0,
+                    minDetectionConfidence: 0.6,
+                    minTrackingConfidence: 0.6
+                });
+
+                hands.onResults(onResults);
+
+                async function setupCamera() {
+                    const camera = new Camera(webcamElement, {
+                        onFrame: async () => {
+                            await hands.send({ image: webcamElement });
+                        },
+                        width: 640,
+                        height: 480
+                    });
+
+                    webcamElement.addEventListener('loadeddata', () => {
+                        landmarkCanvas.width = webcamElement.videoWidth;
+                        landmarkCanvas.height = webcamElement.videoHeight;
+                    });
+
+                    await camera.start();
+                }
+
+                /* ================= API ================= */
+                async function checkApiConnection() {
+                    try {
+                        const res = await fetch(`${API_BASE_URL}/health`);
+                        const data = await res.json();
+                        isApiConnected = data.status === 'healthy';
+                        rawDebug.textContent = JSON.stringify(data, null, 2);
+                        return isApiConnected;
+                    } catch {
+                        rawDebug.textContent = 'Backend unreachable';
+                        return false;
+                    }
+                }
+
+                async function sendPrediction(handsPayload) {
+                    try {
+                        const res = await fetch(`${API_BASE_URL}/predict`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ hands: handsPayload })
+                        });
+
+                        if (!res.ok) {
+                            rawDebug.textContent = `HTTP ${res.status}`;
+                            return;
+                        }
+
+                        const result = await res.json();
+                        rawDebug.textContent = JSON.stringify(result, null, 2);
+
+                        handleResult(result);
+
+                    } catch (err) {
+                        rawDebug.textContent = 'Network error';
+                        console.error(err);
+                    }
+                }
+
+                /* ================= Prediction Handling ================= */
+                function handleResult(result) {
+                    if (!result || !result.success) return;
+
+                    if (result.confidence < MIN_CONF_UI) return;
+
+                    // debounce duplicate outputs
+                    const now = Date.now();
+                    if (result.prediction === lastPrediction && now - lastTime < 400) return;
+
+                    lastPrediction = result.prediction;
+                    lastTime = now;
+
+                    staticOutput.textContent = result.prediction;
+                    confidenceValue.textContent = `${(result.confidence * 100).toFixed(1)}%`;
+                }
+
+                /* ================= MediaPipe Results ================= */
+                async function onResults(results) {
+                    ctx.clearRect(0, 0, landmarkCanvas.width, landmarkCanvas.height);
+                    ctx.drawImage(results.image, 0, 0, landmarkCanvas.width, landmarkCanvas.height);
+
+                    if (!isPredicting || !isApiConnected) return;
+
+                    if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+                        confidenceValue.textContent = '0%';
+                        return;
+                    }
+
+                    // draw hands
+                    results.multiHandLandmarks.forEach(lm => {
+                        drawConnectors(ctx, lm, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 3 });
+                        drawLandmarks(ctx, lm, { color: '#FF0000', lineWidth: 2 });
+                    });
+
+                    // convert format
+                    const payload = results.multiHandLandmarks.map((hand, i) => ({
+                        label: results.multiHandedness[i].label, // "Left" or "Right"
+                        landmarks: hand.map(p => ({ x: p.x, y: p.y }))
+                    }));
+
+
+                    if (payload.length === 0 || payload.length > 2) return;
+
+
+
+
+                    await sendPrediction(payload);
+                }
+
+                /* ================= UI ================= */
+                startBtn.onclick = async () => {
+                    if (!isApiConnected && !(await checkApiConnection())) return;
+                    console.log("WE are in the prediction phase");
+                    isPredicting = true;
+                    startBtn.classList.add('hidden');
+                    stopBtn.classList.remove('hidden');
+                };
+
+                stopBtn.onclick = () => {
+                    isPredicting = false;
+                    startBtn.classList.remove('hidden');
+                    stopBtn.classList.add('hidden');
+                    staticOutput.textContent = '-';
+                    confidenceValue.textContent = '0%';
+                };
+
+                /* ================= START ================= */
+                (async () => {
+                    await setupCamera();
+                    await checkApiConnection();
+                })();
+
+            });
+        </script>
+
+    </body>
+
+    </html>
